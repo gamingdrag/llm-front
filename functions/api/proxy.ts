@@ -30,6 +30,45 @@ export const onRequest = async (context: { request: Request }) => {
       });
     }
 
+    // 1. Parse the URL safely
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(targetUrl);
+    } catch {
+      return new Response(JSON.stringify({ error: 'Invalid target URL' }), { 
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    // 2. Security: Block SSRF (Server-Side Request Forgery)
+    // Prevent attackers from using your proxy to hit internal networks
+    const hostname = parsedUrl.hostname.toLowerCase();
+    const blockedHosts = ['localhost', '127.0.0.1', '0.0.0.0', '[::1]', '169.254.169.254', 'metadata.google.internal'];
+    if (blockedHosts.includes(hostname) || hostname.endsWith('.local') || hostname.endsWith('.internal')) {
+      return new Response(JSON.stringify({ error: 'Access to internal networks is blocked' }), { 
+        status: 403,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    // 3. Security: Prevent Open Proxy Abuse
+    // Only allow requests that originate from your actual frontend URL.
+    // This stops people from using your Worker as a free public proxy.
+    // TODO: Replace with your actual Cloudflare domain when you get it!
+    const allowedOrigins = [
+      'https://llm-front.pages.dev', // Example: your Cloudflare domain
+      'http://localhost:5173'         // For local testing
+    ];
+    const requestOrigin = context.request.headers.get('Origin');
+    if (requestOrigin && !allowedOrigins.includes(requestOrigin)) {
+      return new Response(JSON.stringify({ error: 'Unauthorized origin' }), { 
+        status: 403,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    // 4. Forward the headers
     const headers = new Headers();
     for (const h of FORWARD_HEADERS) {
       const val = context.request.headers.get(h);
